@@ -1,6 +1,8 @@
 require 'java'
 require 'open-uri'
 require 'threadpool'
+require 'net/https'
+require 'cpool'
 
 $STATE = java.util.concurrent.ConcurrentHashMap.new
 
@@ -18,15 +20,26 @@ def long_process(dummy = false, client_side_loadbalancing = false)
   else
     port = "3000"
   end
-  
-  open("http://#{host}:#{port}/") do |f|
-    f.read
+
+  conn = @cpool.get_conn
+  return unless conn
+
+  begin
+    resp = conn.get('/')
+    resp.code
+  rescue
+    raise
+  ensure #put that thing back where it came from or so help me!
+    @cpool.put_conn conn
   end
 end
 
 invoker = Thread.new do
   throughput = 160
   threadpool_size = 2000
+
+  cpool_size = 340
+  @cpool = CPool.new 'localhost', 3000, cpool_size
   
   $STATE['errors'] = java.util.concurrent.ConcurrentHashMap.new
   
@@ -88,6 +101,7 @@ top = Thread.new do
         " CE: ", $STATE['errors']['connection'], " FE: ", $STATE['errors']['fatal'],
         " IT (req/s): ", (total - earlier_total) / poll_delay, 
         " FT (req/s): ", (finished - earlier_finished) / poll_delay, "\n"
+      @cpool.print_stats
     end
     
     sleep poll_delay
